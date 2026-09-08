@@ -37,5 +37,5 @@ pip install PySide6 pywin32 rapidfuzz
 
 1. **Клонируйте репозиторий:**
    ```bash
-   git clone https://github.com/Treveler0/FileContextSelector.git
+   git clone https://github.com/Treveler0/File-Context-Selector.git
    cd FileContextSelector
