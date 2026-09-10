@@ -1,4 +1,4 @@
-# File Context Selector
+# File Context Selector (Разрабатывается через ИИ)
 
 **File Context Selector** — это фоновая утилита для Windows, предназначенная для быстрого поиска, фильтрации и открытия файлов из текущей активной папки Проводника (Explorer) по горячей клавише.
 
@@ -39,3 +39,8 @@ pip install PySide6 pywin32 rapidfuzz
    ```bash
    git clone https://github.com/Treveler0/File-Context-Selector.git
    cd FileContextSelector
+   ```
+2. **Запуск через main.py**
+   ```bash
+   python .\main.py
+   ```
