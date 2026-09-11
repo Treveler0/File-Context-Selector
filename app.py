@@ -27,6 +27,7 @@ from PySide6.QtGui import (
     QIcon,
     QKeySequence,
     QPainter,
+    QPen,
     QShortcut,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -64,7 +65,7 @@ else:
 
 os.chdir(APP_DIR)
 
-APP_VERSION = 1.55
+APP_VERSION = 1.57
 APP_ID = "FileContextSelector.SingleInstance"
 HOTKEY_ID = 1
 MOD_ALT = 0x0001
@@ -195,22 +196,31 @@ class FileItemDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
         painter.save()
         
-        # 1. Отрисовка фона (Выделение / Фокус клавиатуры / Наведение мыши)
+        # 1. Базовый фон строки
         is_selected = bool(option.state & QStyle.State_Selected)
         is_focused = bool(option.state & QStyle.State_HasFocus)
         is_hovered = bool(option.state & QStyle.State_MouseOver)
 
-        if is_selected:
-            painter.fillRect(option.rect, QColor("#1976d2"))
-        elif is_hovered:
+        if is_hovered and not is_selected:
             painter.fillRect(option.rect, QColor("#2b2c30"))
         else:
             painter.fillRect(option.rect, QColor("#202124"))
 
-        # Отрисовка рамки фокуса для визуализации текущей позиции курсора
-        if is_focused and not is_selected:
-            painter.setPen(QColor("#4a90e2"))
-            painter.drawRect(option.rect.adjusted(0, 0, -1, -1))
+        # 2. Выделение (Selected) — приподнятый inset-прямоугольник с паддингом
+        # от края строки, а не заливка во весь ряд: так остаётся место для
+        # рамки фокуса ниже, и два индикатора не сливаются друг с другом.
+        if is_selected:
+            selection_rect = option.rect.adjusted(3, 2, -3, -2)
+            painter.fillRect(selection_rect, QColor("#1976d2"))
+
+        # 3. Рамка фокуса — рисуется ВСЕГДА для текущего элемента (в том
+        # числе поверх выделения), чтобы позиция курсора была явно видна
+        # независимо от того, выделен ли этот пункт.
+        if is_focused:
+            pen = QPen(QColor("#7ab8ff"))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.drawRect(option.rect.adjusted(1, 1, -2, -2))
 
         rect = option.rect.adjusted(8, 0, -10, 0)
         
@@ -297,6 +307,17 @@ class SearchLineEdit(QLineEdit):
                 if self.target_list.currentRow() < 0:
                     self.target_list.setCurrentRow(0)
             return
+        if key == Qt.Key_Up:
+            # Up из поиска — на последний элемент списка (симметрично Down,
+            # который уводит на первый). Вид списка при этом остаётся
+            # прокрученным наверх — не дёргаем scrollbar к низу списка ради
+            # одного этого перехода.
+            if self.target_list.count() > 0:
+                last_row = self.target_list.count() - 1
+                self.target_list.setFocus()
+                self.target_list.setCurrentRow(last_row, QItemSelectionModel.NoUpdate)
+                self.target_list.scrollToTop()
+            return
         if key == Qt.Key_Tab:
             self.target_list.setFocus()
             if self.target_list.count() > 0 and self.target_list.currentRow() < 0:
@@ -306,6 +327,10 @@ class SearchLineEdit(QLineEdit):
 
 
 class FileListWidget(QListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._shift_nav_anchor_row: int | None = None
+
     def keyPressEvent(self, event):
         key = event.key()
         if key in (Qt.Key_Left, Qt.Key_Right):
@@ -322,6 +347,14 @@ class FileListWidget(QListWidget):
             if current_row < 0:
                 event.accept()
                 return
+            if self._shift_nav_anchor_row is None:
+                # Начало новой Shift-навигации — стартовый пункт тоже
+                # становится выделенным (а не только пункты, через которые
+                # проходим дальше).
+                self._shift_nav_anchor_row = current_row
+                start_item = self.item(current_row)
+                if start_item is not None:
+                    start_item.setSelected(True)
             new_row = current_row + (1 if key == Qt.Key_Down else -1)
             if 0 <= new_row < self.count():
                 self.setCurrentRow(new_row, QItemSelectionModel.NoUpdate)
@@ -334,6 +367,20 @@ class FileListWidget(QListWidget):
             if hasattr(window, "search"):
                 window.search.setFocus()
             return
+        if key == Qt.Key_Down and self.currentRow() == self.count() - 1 >= 0:
+            # Симметрично Up с первого элемента — с последнего Down уводит
+            # обратно в поиск, и вид списка сбрасывается наверх (чтобы в
+            # следующий раз список открылся не с того места, где остановились).
+            # currentRow тоже сбрасываем в -1 — иначе следующий Down из
+            # поиска (который проверяет currentRow() < 0) решит, что курсор
+            # уже стоит, и вернёт фокус обратно на последнюю строку вместо
+            # первой.
+            window = self.window()
+            if hasattr(window, "search"):
+                window.search.setFocus()
+                self.scrollToTop()
+                self.setCurrentRow(-1, QItemSelectionModel.NoUpdate)
+            return
         if key == Qt.Key_Tab or (key == Qt.Key_Backtab and event.modifiers() & Qt.ShiftModifier):
             window = self.window()
             if hasattr(window, "search"):
@@ -341,6 +388,13 @@ class FileListWidget(QListWidget):
             return
 
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_Shift:
+            # Конец Shift-жеста — следующее Shift+стрелка снова начнёт с
+            # выделения нового стартового пункта.
+            self._shift_nav_anchor_row = None
+        super().keyReleaseEvent(event)
 
 
 class CheckableMenu(QMenu):
