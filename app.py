@@ -65,7 +65,7 @@ else:
 
 os.chdir(APP_DIR)
 
-APP_VERSION = 1.57
+APP_VERSION = 1.58
 APP_ID = "FileContextSelector.SingleInstance"
 HOTKEY_ID = 1
 MOD_ALT = 0x0001
@@ -301,6 +301,24 @@ class SearchLineEdit(QLineEdit):
 
     def keyPressEvent(self, event):
         key = event.key()
+        shift = bool(event.modifiers() & Qt.ShiftModifier)
+        if shift and key == Qt.Key_Down:
+            # Search -> первый элемент, и сразу выделяем его (в отличие от
+            # обычного Down, который просто переносит фокус без выделения) —
+            # это "вход в список" со стороны Shift-навигации, тут нет
+            # элемента-источника, который можно было бы инвертировать,
+            # поэтому просто выделяем пункт назначения.
+            if self.target_list.count() > 0:
+                self.target_list.setFocus()
+                self.target_list.setCurrentRow(0)
+            return
+        if shift and key == Qt.Key_Up:
+            if self.target_list.count() > 0:
+                last_row = self.target_list.count() - 1
+                self.target_list.setFocus()
+                self.target_list.setCurrentRow(last_row)
+                self.target_list.scrollToTop()
+            return
         if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Down):
             if self.target_list.count() > 0:
                 self.target_list.setFocus()
@@ -327,10 +345,6 @@ class SearchLineEdit(QLineEdit):
 
 
 class FileListWidget(QListWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._shift_nav_anchor_row: int | None = None
-
     def keyPressEvent(self, event):
         key = event.key()
         if key in (Qt.Key_Left, Qt.Key_Right):
@@ -338,28 +352,35 @@ class FileListWidget(QListWidget):
             return
         if event.modifiers() & Qt.ShiftModifier and key in (Qt.Key_Up, Qt.Key_Down):
             # Инвертирование выделения "по мере прохождения" стрелками, а не
-            # классический анкорный range-select: каждый НОВЫЙ пункт, на
-            # который переходим, переключает своё состояние (был выделен —
-            # снимаем, не был — добавляем). Уже пройденные Ctrl-кликом
-            # выделения при этом не сбрасываются целиком, как было бы при
-            # обычном Shift-range.
+            # классический анкорный range-select: на каждое нажатие
+            # переключается состояние ТОГО элемента, с которого уходим (не
+            # того, куда приходим, и не отдельно отслеживаемый "якорь") —
+            # так за одно нажатие меняется ровно один пункт, что и даёт
+            # Explorer-подобное поведение и на росте выделения с пустого
+            # места, и на схлопывании уже выделенного блока.
             current_row = self.currentRow()
             if current_row < 0:
                 event.accept()
                 return
-            if self._shift_nav_anchor_row is None:
-                # Начало новой Shift-навигации — стартовый пункт тоже
-                # становится выделенным (а не только пункты, через которые
-                # проходим дальше).
-                self._shift_nav_anchor_row = current_row
-                start_item = self.item(current_row)
-                if start_item is not None:
-                    start_item.setSelected(True)
+            # Инвертируем текущий элемент безусловно — даже если он уже
+            # первый/последний и двигаться дальше некуда, попытка выйти за
+            # границу всё равно должна выделить/снять этот крайний элемент.
+            current_item = self.item(current_row)
+            if current_item is not None:
+                current_item.setSelected(not current_item.isSelected())
             new_row = current_row + (1 if key == Qt.Key_Down else -1)
             if 0 <= new_row < self.count():
                 self.setCurrentRow(new_row, QItemSelectionModel.NoUpdate)
-                item = self.item(new_row)
-                item.setSelected(not item.isSelected())
+            else:
+                # Дошли до границы списка — заворачиваем в поиск, как и без
+                # Shift (единая петля Search<->Список); крайний элемент уже
+                # инвертирован строчкой выше.
+                window = self.window()
+                if hasattr(window, "search"):
+                    window.search.setFocus()
+                    if key == Qt.Key_Down:
+                        self.scrollToTop()
+                        self.setCurrentRow(-1, QItemSelectionModel.NoUpdate)
             event.accept()
             return
         if key == Qt.Key_Up and self.currentRow() <= 0:
@@ -388,13 +409,6 @@ class FileListWidget(QListWidget):
             return
 
         super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event):
-        if event.key() == Qt.Key_Shift:
-            # Конец Shift-жеста — следующее Shift+стрелка снова начнёт с
-            # выделения нового стартового пункта.
-            self._shift_nav_anchor_row = None
-        super().keyReleaseEvent(event)
 
 
 class CheckableMenu(QMenu):
