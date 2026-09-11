@@ -65,7 +65,7 @@ else:
 
 os.chdir(APP_DIR)
 
-APP_VERSION = 1.58
+APP_VERSION = 1.59
 APP_ID = "FileContextSelector.SingleInstance"
 HOTKEY_ID = 1
 MOD_ALT = 0x0001
@@ -307,16 +307,26 @@ class SearchLineEdit(QLineEdit):
             # обычного Down, который просто переносит фокус без выделения) —
             # это "вход в список" со стороны Shift-навигации, тут нет
             # элемента-источника, который можно было бы инвертировать,
-            # поэтому просто выделяем пункт назначения.
+            # поэтому просто выделяем пункт назначения. Важно: делаем это
+            # через NoUpdate + setSelected(True), а НЕ через голый
+            # setCurrentRow(row) — у него дефолтный флаг ClearAndSelect,
+            # который сносит вообще любое ранее существовавшее выделение
+            # (например, уже выделенный последний пункт).
             if self.target_list.count() > 0:
                 self.target_list.setFocus()
-                self.target_list.setCurrentRow(0)
+                self.target_list.setCurrentRow(0, QItemSelectionModel.NoUpdate)
+                item = self.target_list.item(0)
+                if item is not None:
+                    item.setSelected(True)
             return
         if shift and key == Qt.Key_Up:
             if self.target_list.count() > 0:
                 last_row = self.target_list.count() - 1
                 self.target_list.setFocus()
-                self.target_list.setCurrentRow(last_row)
+                self.target_list.setCurrentRow(last_row, QItemSelectionModel.NoUpdate)
+                item = self.target_list.item(last_row)
+                if item is not None:
+                    item.setSelected(True)
                 self.target_list.scrollToTop()
             return
         if key in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Down):
