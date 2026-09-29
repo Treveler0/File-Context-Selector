@@ -65,7 +65,7 @@ else:
 
 os.chdir(APP_DIR)
 
-APP_VERSION = 1.59
+APP_VERSION = 1.58
 APP_ID = "FileContextSelector.SingleInstance"
 HOTKEY_ID = 1
 MOD_ALT = 0x0001
@@ -1203,9 +1203,14 @@ class SelectorWindow(QWidget):
         # В отличие от Open/Open Folder/Export, удаление не завершает работу
         # с выбором — окно остаётся открытым, список просто перестраивается
         # без уже удалённых файлов, чтобы можно было продолжить работать.
+        # update_count() тут НЕ зовём: request_filter() асинхронный, и на
+        # этот момент виджет ещё старый (с уже удалёнными файлами, всё ещё
+        # отмеченными как selected) — _sync_visible_selection() внутри
+        # update_count() тут же вернула бы их обратно в selected_paths.
+        # _apply_filtered_results сам вызовет update_count(), когда список
+        # реально перестроится.
         self._pending_restore_row = anchor_row
         self.request_filter()
-        self.update_count()
 
     def delete_selected_permanently(self):
         if self.search.hasFocus():
@@ -1239,9 +1244,11 @@ class SelectorWindow(QWidget):
             self.selected_paths.difference_update(succeeded)
         if failed:
             print(f"Не удалось удалить: {sorted(failed)}")
+        # update_count() тут не зовём — см. комментарий в
+        # delete_selected_to_recycle_bin; _apply_filtered_results вызовет
+        # его сам после реальной перестройки списка.
         self._pending_restore_row = anchor_row
         self.request_filter()
-        self.update_count()
 
     def _on_open_button_clicked(self):
         # Shift+клик по кнопке Open ведёт себя как Open Folder — тот же

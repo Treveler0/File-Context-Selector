@@ -19,15 +19,26 @@ class FileRegistry:
         self.files: list[tuple[Path, str]] = []
         self.extensions: set[str] = set()
         self.ext_counts: dict[str, int] = {}
+        # "Надгробья" удалённых файлов: сканер-потоки работают в фоне
+        # независимо от Delete (мы намеренно их не глушим, чтобы окно не
+        # зависало) — если батч с уже удалённым файлом был прочитан с диска
+        # ДО удаления, но доставлен в add_files ПОСЛЕ, он тихо вернул бы
+        # файл обратно в реестр поверх только что сделанного remove_files().
+        self.removed_paths: set[str] = set()
 
     def clear(self):
         self.files.clear()
         self.extensions.clear()
         self.ext_counts.clear()
+        self.removed_paths.clear()
 
     def add_files(self, new_files: list[tuple[Path, str]]) -> bool:
         new_ext_found = False
         for full_path, rel_path in new_files:
+            if str(full_path) in self.removed_paths:
+                # Файл уже был удалён пользователем — сканер просто не знал
+                # об этом на момент, когда прочитал его с диска.
+                continue
             self.files.append((full_path, rel_path))
             ext = Path(rel_path).suffix.lower()
             if not ext:
@@ -41,6 +52,7 @@ class FileRegistry:
     def remove_files(self, full_paths_to_remove: set[str]):
         """Убирает файлы из реестра после удаления с диска (Delete),
         не трогая живущий scanner-поток — только in-memory состояние."""
+        self.removed_paths.update(full_paths_to_remove)
         remaining = []
         for full_path, rel_path in self.files:
             if str(full_path) in full_paths_to_remove:
